@@ -143,6 +143,7 @@ enum LoadedEngine {
     MoonshineStreaming(MoonshineStreamingEngine),
     SenseVoice(SenseVoiceEngine),
     Cloud,
+    Gemini,
 }
 
 #[derive(Clone)]
@@ -267,6 +268,7 @@ impl TranscriptionManager {
                     LoadedEngine::MoonshineStreaming(ref mut e) => e.unload_model(),
                     LoadedEngine::SenseVoice(ref mut e) => e.unload_model(),
                     LoadedEngine::Cloud => { /* nothing to unload */ }
+                    LoadedEngine::Gemini => { /* nothing to unload */ }
                 }
             }
             *engine = None; // Drop the engine to free memory
@@ -449,6 +451,7 @@ impl TranscriptionManager {
                 LoadedEngine::SenseVoice(engine)
             }
             EngineType::Cloud => LoadedEngine::Cloud,
+            EngineType::Gemini => LoadedEngine::Gemini,
         };
 
         // Update the current engine and model ID
@@ -506,7 +509,7 @@ impl TranscriptionManager {
         current_model.clone()
     }
 
-    pub fn transcribe(&self, audio: Vec<f32>) -> Result<String> {
+    pub fn transcribe(&self, audio: Vec<f32>, prompt: Option<String>) -> Result<String> {
         // Update last activity timestamp
         self.last_activity.store(
             SystemTime::now()
@@ -676,6 +679,56 @@ impl TranscriptionManager {
                                     Err(e) => {
                                         warn!(
                                             "Cloud transcription attempt {}/{} failed: {}",
+                                            attempt + 1,
+                                            RETRY_DELAYS_MS.len(),
+                                            e
+                                        );
+                                        last_error = e;
+                                    }
+                                }
+                            }
+
+                            Err(last_error)
+                        }
+                        LoadedEngine::Gemini => {
+                            let wav = samples_to_wav_bytes(&audio)?;
+
+                            const RETRY_DELAYS_MS: &[u64] = &[0, 300, 800];
+                            let mut last_error =
+                                anyhow::anyhow!("Unknown Gemini transcription error");
+
+                            for (attempt, &delay) in RETRY_DELAYS_MS.iter().enumerate() {
+                                if delay > 0 {
+                                    debug!(
+                                        "Gemini transcription retry {}/{}, waiting {}ms",
+                                        attempt + 1,
+                                        RETRY_DELAYS_MS.len(),
+                                        delay
+                                    );
+                                    thread::sleep(Duration::from_millis(delay));
+                                }
+
+                                let api_result = tokio::task::block_in_place(|| {
+                                    tauri::async_runtime::block_on(
+                                        crate::gemini_client::call_gemini_api(
+                                            &settings.gemini_api_key,
+                                            &settings.gemini_model,
+                                            wav.clone(),
+                                            prompt.clone(),
+                                        ),
+                                    )
+                                });
+
+                                match api_result {
+                                    Ok(text) => {
+                                        return Ok(transcribe_rs::TranscriptionResult {
+                                            text,
+                                            segments: None,
+                                        });
+                                    }
+                                    Err(e) => {
+                                        warn!(
+                                            "Gemini transcription attempt {}/{} failed: {}",
                                             attempt + 1,
                                             RETRY_DELAYS_MS.len(),
                                             e
