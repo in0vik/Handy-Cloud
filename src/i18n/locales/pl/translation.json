@@ -28,8 +28,8 @@
       "speed": "szybkość"
     },
     "models": {
-      "medium-q5": {
-        "name": "Whisper Medium Q5",
+      "medium": {
+        "name": "Whisper Medium",
         "description": "Dobra dokładność, średnia szybkość"
       },
       "large": {

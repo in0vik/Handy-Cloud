@@ -122,17 +122,14 @@ impl ModelManager {
         );
 
         available_models.insert(
-            "medium-q5".to_string(),
+            "medium".to_string(),
             ModelInfo {
-                id: "medium-q5".to_string(),
-                name: "Whisper Medium Q5".to_string(),
-                description: "Good accuracy, medium speed.".to_string(),
-                filename: "ggml-medium-q5_0.bin".to_string(),
-                url: Some(
-                    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium-q5_0.bin"
-                        .to_string(),
-                ),
-                size_mb: 539,
+                id: "medium".to_string(),
+                name: "Whisper Medium".to_string(),
+                description: "Good accuracy, medium speed".to_string(),
+                filename: "whisper-medium-q4_1.bin".to_string(),
+                url: Some("https://blob.handy.computer/whisper-medium-q4_1.bin".to_string()),
+                size_mb: 492,
                 is_downloaded: false,
                 is_downloading: false,
                 partial_size: 0,
