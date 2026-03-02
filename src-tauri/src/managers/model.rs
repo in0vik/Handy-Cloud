@@ -151,29 +151,6 @@ impl ModelManager {
         );
 
         available_models.insert(
-            "medium-q5".to_string(),
-            ModelInfo {
-                id: "medium-q5".to_string(),
-                name: "Whisper Medium Q5".to_string(),
-                description: "Good accuracy, medium speed.".to_string(),
-                filename: "ggml-medium-q5_0.bin".to_string(),
-                url: Some("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium-q5_0.bin".to_string()),
-                size_mb: 539,
-                is_downloaded: false,
-                is_downloading: false,
-                partial_size: 0,
-                is_directory: false,
-                engine_type: EngineType::Whisper,
-                accuracy_score: 0.75,
-                speed_score: 0.60,
-                supports_translation: true,
-                is_recommended: false,
-                supported_languages: whisper_languages.clone(),
-                is_custom: false,
-            },
-        );
-
-        available_models.insert(
             "turbo-q5".to_string(),
             ModelInfo {
                 id: "turbo-q5".to_string(),
