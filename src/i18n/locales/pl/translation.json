@@ -4,6 +4,7 @@
     "checkUpdates": "Sprawdź aktualizacje...",
     "copyLastTranscript": "Kopiuj ostatnią transkrypcję",
     "unloadModel": "Zwolnij model",
+    "model": "Model",
     "quit": "Zamknij",
     "cancel": "Anuluj"
   },
@@ -71,6 +72,18 @@
       "gigaam-v3-e2e-ctc": {
         "name": "GigaAM v3",
         "description": "Rozpoznawanie mowy rosyjskiej. Szybkie i dokładne."
+      },
+      "canary-180m-flash": {
+        "name": "Canary 180M Flash",
+        "description": "Bardzo szybki. Angielski, niemiecki, hiszpański, francuski. Obsługuje tłumaczenie."
+      },
+      "canary-1b-v2": {
+        "name": "Canary 1B v2",
+        "description": "Dokładny wielojęzyczny. 25 języków europejskich. Obsługuje tłumaczenie."
+      },
+      "cohere-int8": {
+        "name": "Cohere",
+        "description": "Duży, wolniejszy, ale bardzo dokładny model wielojęzyczny."
       }
     },
     "errors": {
@@ -103,6 +116,8 @@
     "active": "Aktywny",
     "switching": "Przełączanie...",
     "noModelsAvailable": "Brak dostępnych modeli",
+    "verifying": "Weryfikacja {{modelName}}...",
+    "verifyingGeneric": "Weryfikacja...",
     "extracting": "Rozpakowywanie {{modelName}}...",
     "extractingMultiple": "Rozpakowywanie {{count}} modeli...",
     "extractingGeneric": "Rozpakowywanie...",
@@ -228,6 +243,25 @@
         "label": "Funkcje Eksperymentalne",
         "description": "Włącz funkcje eksperymentalne, które są jeszcze w fazie rozwoju."
       },
+      "lazyStreamClose": {
+        "label": "Pozostaw mikrofon otwarty między transkrypcjami",
+        "description": "Utrzymuje strumień mikrofonu otwarty przez 30 sekund po zatrzymaniu nagrywania, zmniejszając opóźnienie przy kolejnych transkrypcjach. Może pogorszyć jakość dźwięku Bluetooth."
+      },
+      "acceleration": {
+        "whisper": {
+          "title": "Akceleracja Whisper",
+          "description": "Akceleracja sprzętowa dla modeli Whisper. Tryb automatyczny używa GPU, jeśli jest dostępny (Metal na macOS, Vulkan na Windows/Linux)."
+        },
+        "ort": {
+          "title": "Akceleracja ONNX",
+          "description": "Akceleracja sprzętowa dla modeli ONNX (Parakeet, Canary, Moonshine itp.). DirectML na Windows jest eksperymentalne. Modele mogą nie transkrybować poprawnie."
+        },
+        "gpuDevice": {
+          "title": "Urządzenie GPU",
+          "description": "Wybierz GPU do inferencji Whisper. Auto wybiera dedykowany GPU.",
+          "auto": "Auto"
+        }
+      },
       "startHidden": {
         "label": "Uruchom ukryty",
         "description": "Uruchom w zasobniku systemowym bez otwierania okna."
@@ -304,7 +338,7 @@
           "min10": "Po 10 minutach",
           "min15": "Po 15 minutach",
           "hour1": "Po 1 godzinie",
-          "sec5": "Po 5 sekundach (Debug)"
+          "sec15": "Po 15 sekundach (Debug)"
         }
       },
       "customWords": {
@@ -385,7 +419,11 @@
       "save": "Zapisz transkrypcję",
       "unsave": "Usuń z zapisanych",
       "delete": "Usuń wpis",
-      "deleteError": "Nie udało się usunąć wpisu. Spróbuj ponownie."
+      "deleteError": "Nie udało się usunąć wpisu. Spróbuj ponownie.",
+      "retranscribe": "Transkrybuj ponownie",
+      "retranscribeError": "Nie udało się ponownie transkrybować. Spróbuj ponownie.",
+      "transcribing": "Transkrybuję...",
+      "transcriptionFailed": "Transkrypcja nie powiodła się. Możesz transkrybować ponownie za pomocą ikony ponowienia."
     },
     "debug": {
       "title": "Debugowanie",
@@ -457,6 +495,10 @@
       "pasteDelay": {
         "title": "Opóźnienie wklejania",
         "description": "Opóźnienie przed wysłaniem klawisza wklejania (w milisekundach). Zwiększ, jeśli wklejany jest nieprawidłowy tekst."
+      },
+      "recordingBuffer": {
+        "title": "Dodatkowy bufor nagrywania",
+        "description": "Dodatkowy czas (w milisekundach) na kontynuowanie nagrywania po zwolnieniu klawisza, aby przechwycić końcowy dźwięk. 0 = brak dodatkowego bufora."
       }
     },
     "about": {
@@ -501,7 +543,10 @@
     "downloading": "Pobieranie... {{progress}}%",
     "installing": "Instalowanie...",
     "preparing": "Przygotowywanie...",
-    "checkForUpdates": "Sprawdź aktualizacje"
+    "checkForUpdates": "Sprawdź aktualizacje",
+    "portableUpdateTitle": "Manual update required",
+    "portableUpdateMessage": "Portable installs cannot be updated automatically. To update: download the latest NSIS installer from GitHub Releases, install it to the same folder, then copy your Data/ folder (settings, models, recordings) from the old version to the new one.",
+    "portableUpdateButton": "Open GitHub Releases"
   },
   "common": {
     "loading": "Wczytywanie...",
@@ -532,7 +577,19 @@
     "dismiss": "Zamknij"
   },
   "errors": {
-    "loadDirectory": "Błąd wczytywania katalogu: {{error}}"
+    "loadDirectory": "Błąd wczytywania katalogu: {{error}}",
+    "micPermissionDeniedTitle": "Odmowa dostępu do mikrofonu",
+    "micPermissionDenied": {
+      "generic": "System operacyjny odmówił dostępu do mikrofonu. Przyznaj uprawnienia do mikrofonu w ustawieniach systemowych.",
+      "windows": "Włącz dostęp do mikrofonu w Ustawienia → Prywatność i zabezpieczenia → Mikrofon (w tym dostęp aplikacji klasycznych).",
+      "macos": "Przyznaj dostęp do mikrofonu w Ustawienia systemowe → Prywatność i ochrona → Mikrofon.",
+      "linux": "Przyznaj dostęp do mikrofonu w ustawieniach dźwięku lub prywatności systemu."
+    },
+    "noInputDeviceTitle": "Nie znaleziono mikrofonu",
+    "noInputDevice": "Nie wykryto żadnego urządzenia wejściowego audio. Podłącz mikrofon lub słuchawki i spróbuj ponownie.",
+    "recordingFailed": "Nie udało się rozpocząć nagrywania: {{error}}",
+    "modelLoadFailed": "Nie udało się załadować modelu: {{model}}",
+    "modelLoadFailedUnknown": "nieznany model"
   },
   "appLanguage": {
     "title": "Język aplikacji",

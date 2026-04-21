@@ -30,6 +30,7 @@ export const ModelsSettings: React.FC = () => {
     downloadingModels,
     downloadProgress,
     downloadStats,
+    verifyingModels,
     extractingModels,
     loading,
     downloadModel,
@@ -80,6 +81,9 @@ export const ModelsSettings: React.FC = () => {
   const getModelStatus = (modelId: string): ModelCardStatus => {
     if (modelId in extractingModels) {
       return "extracting";
+    }
+    if (modelId in verifyingModels) {
+      return "verifying";
     }
     if (modelId in downloadingModels) {
       return "downloading";

@@ -1,6 +1,12 @@
 import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
-import type { AppSettings as Settings, AudioDevice } from "@/bindings";
+import { listen } from "@tauri-apps/api/event";
+import type {
+  AppSettings as Settings,
+  AudioDevice,
+  WhisperAcceleratorSetting,
+  OrtAcceleratorSetting,
+} from "@/bindings";
 import { commands } from "@/bindings";
 
 interface SettingsStore {
@@ -111,6 +117,8 @@ const settingUpdaters: {
   custom_words: (value) => commands.updateCustomWords(value as string[]),
   word_correction_threshold: (value) =>
     commands.changeWordCorrectionThresholdSetting(value as number),
+  paste_delay_ms: (value) =>
+    commands.changePasteDelayMsSetting(value as number),
   paste_method: (value) => commands.changePasteMethodSetting(value as string),
   typing_tool: (value) => commands.changeTypingToolSetting(value as string),
   external_script_path: (value) =>
@@ -133,8 +141,20 @@ const settingUpdaters: {
   app_language: (value) => commands.changeAppLanguageSetting(value as string),
   experimental_enabled: (value) =>
     commands.changeExperimentalEnabledSetting(value as boolean),
+  lazy_stream_close: (value) =>
+    commands.changeLazyStreamCloseSetting(value as boolean),
   show_tray_icon: (value) =>
     commands.changeShowTrayIconSetting(value as boolean),
+  whisper_accelerator: (value) =>
+    commands.changeWhisperAcceleratorSetting(
+      value as WhisperAcceleratorSetting,
+    ),
+  ort_accelerator: (value) =>
+    commands.changeOrtAcceleratorSetting(value as OrtAcceleratorSetting),
+  whisper_gpu_device: (value) =>
+    commands.changeWhisperGpuDevice(value as number),
+  extra_recording_buffer_ms: (value) =>
+    commands.changeExtraRecordingBufferSetting(value as number),
 };
 
 export const useSettingsStore = create<SettingsStore>()(
@@ -565,6 +585,12 @@ export const useSettingsStore = create<SettingsStore>()(
         refreshSettings(),
         checkCustomSounds(),
       ]);
+
+      // Re-fetch settings when the backend changes them (e.g. language
+      // reset during model switch). The backend is the source of truth.
+      listen("model-state-changed", () => {
+        get().refreshSettings();
+      });
     },
   })),
 );

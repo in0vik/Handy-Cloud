@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import { RefreshCcw } from "lucide-react";
 import { commands } from "@/bindings";
 
@@ -20,9 +20,7 @@ import { ApiKeyField } from "../PostProcessingSettingsApi/ApiKeyField";
 import { ModelSelect } from "../PostProcessingSettingsApi/ModelSelect";
 import { usePostProcessProviderState } from "../PostProcessingSettingsApi/usePostProcessProviderState";
 import { ShortcutInput } from "../ShortcutInput";
-import { MODEL_ID_GEMINI } from "@/lib/constants/models";
 import { useSettings } from "../../../hooks/useSettings";
-import { useModelStore } from "../../../stores/modelStore";
 
 const PostProcessingSettingsApiComponent: React.FC = () => {
   const { t } = useTranslation();
@@ -145,14 +143,10 @@ const PostProcessingSettingsApiComponent: React.FC = () => {
   );
 };
 
-const GEMINI_PROMPT_ID = "default_gemini_transcription";
-
 const PostProcessingSettingsPromptsComponent: React.FC = () => {
   const { t } = useTranslation();
   const { getSetting, updateSetting, isUpdating, refreshSettings } =
     useSettings();
-  const { currentModel } = useModelStore();
-  const isGemini = currentModel === MODEL_ID_GEMINI;
   const [isCreating, setIsCreating] = useState(false);
   const [draftName, setDraftName] = useState("");
   const [draftText, setDraftText] = useState("");
@@ -248,7 +242,6 @@ const PostProcessingSettingsPromptsComponent: React.FC = () => {
   };
 
   const hasPrompts = prompts.length > 0;
-  const isGeminiPrompt = selectedPromptId === GEMINI_PROMPT_ID;
   const isDirty =
     !!selectedPrompt &&
     (draftName.trim() !== selectedPrompt.name ||
@@ -307,7 +300,6 @@ const PostProcessingSettingsPromptsComponent: React.FC = () => {
                   "settings.postProcessing.prompts.promptLabelPlaceholder",
                 )}
                 variant="compact"
-                disabled={isGeminiPrompt}
               />
             </div>
 
@@ -322,16 +314,12 @@ const PostProcessingSettingsPromptsComponent: React.FC = () => {
                   "settings.postProcessing.prompts.promptInstructionsPlaceholder",
                 )}
               />
-              <p
-                className="text-xs text-mid-gray/70"
-                dangerouslySetInnerHTML={{
-                  __html: t(
-                    isGemini
-                      ? "settings.postProcessing.prompts.promptTipGemini"
-                      : "settings.postProcessing.prompts.promptTip",
-                  ),
-                }}
-              />
+              <p className="text-xs text-mid-gray/70">
+                <Trans
+                  i18nKey="settings.postProcessing.prompts.promptTip"
+                  components={{ code: <code /> }}
+                />
+              </p>
             </div>
 
             <div className="flex gap-2 pt-2">
@@ -347,9 +335,7 @@ const PostProcessingSettingsPromptsComponent: React.FC = () => {
                 onClick={() => handleDeletePrompt(selectedPromptId)}
                 variant="secondary"
                 size="md"
-                disabled={
-                  !selectedPromptId || prompts.length <= 1 || isGeminiPrompt
-                }
+                disabled={!selectedPromptId || prompts.length <= 1}
               >
                 {t("settings.postProcessing.prompts.deletePrompt")}
               </Button>
@@ -395,16 +381,12 @@ const PostProcessingSettingsPromptsComponent: React.FC = () => {
                   "settings.postProcessing.prompts.promptInstructionsPlaceholder",
                 )}
               />
-              <p
-                className="text-xs text-mid-gray/70"
-                dangerouslySetInnerHTML={{
-                  __html: t(
-                    isGemini
-                      ? "settings.postProcessing.prompts.promptTipGemini"
-                      : "settings.postProcessing.prompts.promptTip",
-                  ),
-                }}
-              />
+              <p className="text-xs text-mid-gray/70">
+                <Trans
+                  i18nKey="settings.postProcessing.prompts.promptTip"
+                  components={{ code: <code /> }}
+                />
+              </p>
             </div>
 
             <div className="flex gap-2 pt-2">
@@ -443,8 +425,6 @@ PostProcessingSettingsPrompts.displayName = "PostProcessingSettingsPrompts";
 
 export const PostProcessingSettings: React.FC = () => {
   const { t } = useTranslation();
-  const { currentModel } = useModelStore();
-  const isGemini = currentModel === MODEL_ID_GEMINI;
 
   return (
     <div className="max-w-3xl w-full mx-auto space-y-6">
@@ -456,17 +436,9 @@ export const PostProcessingSettings: React.FC = () => {
         />
       </SettingsGroup>
 
-      {isGemini ? (
-        <SettingsGroup title={t("settings.postProcessing.api.title")}>
-          <Alert variant="info" contained>
-            {t("settings.postProcessing.gemini.activeNotice")}
-          </Alert>
-        </SettingsGroup>
-      ) : (
-        <SettingsGroup title={t("settings.postProcessing.api.title")}>
-          <PostProcessingSettingsApi />
-        </SettingsGroup>
-      )}
+      <SettingsGroup title={t("settings.postProcessing.api.title")}>
+        <PostProcessingSettingsApi />
+      </SettingsGroup>
 
       <SettingsGroup title={t("settings.postProcessing.prompts.title")}>
         <PostProcessingSettingsPrompts />

@@ -4,6 +4,7 @@
     "checkUpdates": "Check for Updates...",
     "copyLastTranscript": "Copy Last Transcript",
     "unloadModel": "Unload Model",
+    "model": "Model",
     "quit": "Quit",
     "cancel": "Cancel"
   },
@@ -28,9 +29,17 @@
       "speed": "speed"
     },
     "models": {
-      "medium-q5": {
-        "name": "Whisper Medium Q5",
+      "small": {
+        "name": "Whisper Small",
+        "description": "Fast and fairly accurate."
+      },
+      "medium": {
+        "name": "Whisper Medium",
         "description": "Good accuracy, medium speed"
+      },
+      "turbo": {
+        "name": "Whisper Turbo",
+        "description": "Balanced accuracy and speed."
       },
       "large": {
         "name": "Whisper Large",
@@ -71,6 +80,18 @@
       "gigaam-v3-e2e-ctc": {
         "name": "GigaAM v3",
         "description": "Russian speech recognition. Fast and accurate."
+      },
+      "canary-180m-flash": {
+        "name": "Canary 180M Flash",
+        "description": "Very fast. English, German, Spanish, French. Supports translation."
+      },
+      "canary-1b-v2": {
+        "name": "Canary 1B v2",
+        "description": "Accurate multilingual. 25 European languages. Supports translation."
+      },
+      "cohere-int8": {
+        "name": "Cohere",
+        "description": "A large, slower, but very accurate multilingual model."
       }
     },
     "errors": {
@@ -103,6 +124,8 @@
     "active": "Active",
     "switching": "Switching...",
     "noModelsAvailable": "No models available",
+    "verifying": "Verifying {{modelName}}...",
+    "verifyingGeneric": "Verifying...",
     "extracting": "Extracting {{modelName}}...",
     "extractingMultiple": "Extracting {{count}} models...",
     "extractingGeneric": "Extracting...",
@@ -190,47 +213,7 @@
         "translation": "Translation",
         "allLanguages": "All Languages"
       },
-      "noModelsMatch": "No models match this filter.",
-      "cloudProviders": "API",
-      "cloudTranscription": {
-        "title": "Local Server",
-        "description": "Your own Whisper server or compatible endpoint",
-        "baseUrlLabel": "Server URL",
-        "baseUrlPlaceholder": "http://localhost:8000/v1",
-        "apiKeyLabel": "API Key",
-        "apiKeyPlaceholder": "sk-••••••••",
-        "apiKeyOptional": "Optional — leave empty for servers without authentication",
-        "modelLabel": "Model",
-        "modelPlaceholder": "whisper-large-v3",
-        "configured": "Configured",
-        "notConfigured": "Not configured",
-        "selectButton": "Select",
-        "test": "Test",
-        "testing": "Testing...",
-        "testOk": "Connected",
-        "testFailed": "Connection failed",
-        "hint": "Local servers (faster-whisper, LocalAI, whisper.cpp) or remote APIs (Groq, OpenAI).",
-        "advanced": "Advanced",
-        "extraParamsHint": "JSON — additional fields sent to /audio/transcriptions"
-      },
-      "gemini": {
-        "title": "Google Gemini",
-        "description": "Transcription + AI processing in one step via Google Gemini API",
-        "apiKeyLabel": "API Key",
-        "apiKeyPlaceholder": "AIza...",
-        "apiKeyHint": "Get your key at aistudio.google.com",
-        "modelLabel": "Model",
-        "modelPlaceholder": "gemini-2.0-flash",
-        "promptLabel": "Post-Process Prompt",
-        "promptHint": "Used when pressing the Transcribe with Post-Processing shortcut",
-        "promptPlaceholder": "Transcribe the audio accurately. Fix capitalization and punctuation...",
-        "configured": "Configured",
-        "notConfigured": "Not configured",
-        "test": "Test",
-        "testFailed": "Connection test failed",
-        "selectButton": "Select",
-        "customModel": "Custom..."
-      }
+      "noModelsMatch": "No models match this filter."
     },
     "sound": {
       "title": "Sound",
@@ -267,6 +250,25 @@
       "experimentalToggle": {
         "label": "Experimental Features",
         "description": "Enable experimental features that are still in development."
+      },
+      "lazyStreamClose": {
+        "label": "Keep Mic Open Between Transcriptions",
+        "description": "Keeps the microphone stream open for 30 seconds after recording stops, reducing latency for back-to-back transcriptions. May degrade Bluetooth audio quality while active."
+      },
+      "acceleration": {
+        "whisper": {
+          "title": "Whisper Acceleration",
+          "description": "Hardware acceleration for Whisper models. Auto uses GPU if available (Metal on macOS, Vulkan on Windows/Linux)."
+        },
+        "ort": {
+          "title": "ONNX Acceleration",
+          "description": "Hardware acceleration for ONNX models (Parakeet, Canary, Moonshine, etc.). DirectML on Windows is experimental. Models may fail to transcribe."
+        },
+        "gpuDevice": {
+          "title": "GPU Device",
+          "description": "Select which GPU to use for Whisper inference. Auto picks the dedicated GPU.",
+          "auto": "Auto"
+        }
       },
       "startHidden": {
         "label": "Start Hidden",
@@ -344,7 +346,7 @@
           "min10": "After 10 minutes",
           "min15": "After 15 minutes",
           "hour1": "After 1 hour",
-          "sec5": "After 5 seconds (Debug)"
+          "sec15": "After 15 seconds (Debug)"
         }
       },
       "customWords": {
@@ -360,13 +362,6 @@
       "title": "Post Process",
       "hotkey": {
         "title": "Hotkey"
-      },
-      "gemini": {
-        "activeNotice": "Google Gemini is your active transcription model — transcription and post-processing happen in one step. Configure the prompt below.",
-        "promptName": "Gemini Transcription",
-        "promptDescription": "Sent as a system instruction alongside your audio when using Transcribe with Post-Processing.",
-        "promptPlaceholder": "Transcribe the audio accurately. Fix capitalization and punctuation...",
-        "resetPrompt": "Reset to Default"
       },
       "api": {
         "title": "API (OpenAI Compatible)",
@@ -415,7 +410,6 @@
         "promptInstructions": "Prompt Instructions",
         "promptInstructionsPlaceholder": "Write the instructions to run after transcription. Example: Improve grammar and clarity for the following text: ${output}",
         "promptTip": "Tip: Use <code>${output}</code> to insert the transcribed text in your prompt.",
-        "promptTipGemini": "Gemini mode: This prompt is sent as a system instruction alongside the audio. <code>${output}</code> is stripped automatically — Gemini receives the audio directly.",
         "updatePrompt": "Update Prompt",
         "deletePrompt": "Delete Prompt",
         "createPrompt": "Create Prompt",
@@ -434,11 +428,10 @@
       "unsave": "Remove from saved",
       "delete": "Delete entry",
       "deleteError": "Failed to delete entry. Please try again.",
-      "cloudPending": {
-        "placeholder": "Transcription failed — tap Retry to try again",
-        "retryButton": "Retry",
-        "retrying": "Retrying..."
-      }
+      "retranscribe": "Re-transcribe",
+      "retranscribeError": "Failed to re-transcribe. Please try again.",
+      "transcribing": "Transcribing...",
+      "transcriptionFailed": "Transcription failed. You can re-transcribe using the retry icon."
     },
     "debug": {
       "title": "Debug",
@@ -510,6 +503,10 @@
       "pasteDelay": {
         "title": "Paste Delay",
         "description": "Delay before sending paste keystroke (in milliseconds). Increase if wrong text is being pasted."
+      },
+      "recordingBuffer": {
+        "title": "Extra Recording Buffer",
+        "description": "Extra time (in milliseconds) to keep recording after you release the key, to capture trailing audio. 0 = no extra buffer."
       }
     },
     "about": {
@@ -542,9 +539,6 @@
       }
     }
   },
-  "notifications": {
-    "cloudTranscriptionFailed": "Server transcription failed. Recording saved — retry from History."
-  },
   "footer": {
     "downloadingModel": "Downloading {{model}}...",
     "checkingUpdates": "Checking for updates...",
@@ -557,7 +551,10 @@
     "downloading": "Downloading... {{progress}}%",
     "installing": "Installing...",
     "preparing": "Preparing...",
-    "checkForUpdates": "Check for updates"
+    "checkForUpdates": "Check for updates",
+    "portableUpdateTitle": "Manual update required",
+    "portableUpdateMessage": "Portable installs cannot be updated automatically. To update: download the latest NSIS installer from GitHub Releases, install it to the same folder, then copy your Data/ folder (settings, models, recordings) from the old version to the new one.",
+    "portableUpdateButton": "Open GitHub Releases"
   },
   "common": {
     "loading": "Loading...",
@@ -588,7 +585,19 @@
     "dismiss": "Dismiss"
   },
   "errors": {
-    "loadDirectory": "Error loading directory: {{error}}"
+    "loadDirectory": "Error loading directory: {{error}}",
+    "micPermissionDeniedTitle": "Microphone Access Denied",
+    "micPermissionDenied": {
+      "generic": "Microphone access was denied by the operating system. Please grant microphone permission in your system settings.",
+      "windows": "Enable microphone access in Settings → Privacy & security → Microphone (including desktop app access).",
+      "macos": "Grant microphone access in System Settings → Privacy & Security → Microphone.",
+      "linux": "Grant microphone access in your system's sound or privacy settings."
+    },
+    "noInputDeviceTitle": "No Microphone Found",
+    "noInputDevice": "No audio input device was detected. Please connect a microphone or headset and try again.",
+    "recordingFailed": "Failed to start recording: {{error}}",
+    "modelLoadFailed": "Failed to load model: {{model}}",
+    "modelLoadFailedUnknown": "unknown model"
   },
   "appLanguage": {
     "title": "Application Language",

@@ -47,6 +47,8 @@ The process is entirely local:
 
 1. Download the latest release from the [releases page](https://github.com/cjpais/Handy/releases) or the [website](https://handy.computer)
    - **macOS**: Also available via [Homebrew cask](https://formulae.brew.sh/cask/handy): `brew install --cask handy`
+   - **Windows**: Also available via [winget](https://github.com/microsoft/winget-pkgs): `winget install cjpais.Handy` \
+     **Note:** The Homebrew cask and winget package are not maintained by the Handy developers.
 2. Install the application
 3. Launch Handy and grant necessary system permissions (microphone, accessibility)
 4. Configure your preferred keyboard shortcuts in Settings
@@ -55,6 +57,14 @@ The process is entirely local:
 ### Development Setup
 
 For detailed build instructions including platform-specific requirements, see [BUILD.md](BUILD.md).
+
+## Integrations
+
+<a href="https://www.raycast.com/mattiacolombomc/handy" title="Install Handy Raycast Extension"><img src="https://www.raycast.com/mattiacolombomc/handy/install_button@2x.png?v=1.1" height="64" style="height: 64px;" alt="Install handy Raycast Extension" /></a>
+
+Control Handy from [Raycast](https://www.raycast.com) — start/stop recording, browse transcript history, manage dictionary, switch models and languages.
+
+[Source](https://github.com/mattiacolombomc/raycast-handy) · by [@mattiacolombomc](https://github.com/mattiacolombomc)
 
 ## Architecture
 
@@ -262,6 +272,41 @@ We're actively working on several features and improvements. Contributions and f
 - Abstract and organize Tauri command patterns
 - Investigate tauri-specta for improved type safety and organization
 
+## Verify Release Signatures
+
+Handy release artifacts are signed with Tauri's updater signature format. The public key is stored in [`src-tauri/tauri.conf.json`](src-tauri/tauri.conf.json) under `plugins.updater.pubkey`.
+
+To verify a release manually, set `ARTIFACT` to the filename you downloaded, save the `pubkey` value from `src-tauri/tauri.conf.json` to `handy.pub.b64`, then decode the public key and matching `.sig` file from base64 and verify the artifact with `minisign`:
+
+```bash
+# Replace with the file you downloaded
+ARTIFACT="Handy_0.8.1_amd64.AppImage"
+
+python3 - "$ARTIFACT" <<'PY'
+import base64, pathlib, sys
+
+artifact = sys.argv[1]
+
+pub = pathlib.Path("handy.pub.b64").read_text().strip()
+pathlib.Path("handy.pub").write_bytes(base64.b64decode(pub))
+
+sig = pathlib.Path(f"{artifact}.sig").read_text().strip()
+pathlib.Path(f"{artifact}.minisig").write_bytes(base64.b64decode(sig))
+PY
+
+minisign -Vm "$ARTIFACT" \
+  -p handy.pub \
+  -x "$ARTIFACT.minisig"
+```
+
+On success, `minisign` prints:
+
+```text
+Signature and comment signature verified
+```
+
+Do not use `gpg` for these `.sig` files.
+
 ## Troubleshooting
 
 ### Manual Model Installation (For Proxy Users or Network Restrictions)
@@ -418,7 +463,3 @@ MIT License - see [LICENSE](LICENSE) file for details.
 - **Silero** for great lightweight VAD
 - **Tauri** team for the excellent Rust-based app framework
 - **Community contributors** helping make Handy better
-
----
-
-_"Your search for the right speech-to-text tool can end here—not because Handy is perfect, but because you can make it perfect for you."_

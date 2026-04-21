@@ -1,6 +1,6 @@
 [package]
 name = "handy"
-version = "0.7.9"
+version = "0.8.2"
 description = "Handy"
 authors = ["cjpais"]
 edition = "2021"
@@ -70,14 +70,15 @@ chrono = "0.4"
 rusqlite = { version = "0.37", features = ["bundled"] }
 tar = "0.4.44"
 flate2 = "1.0"
-transcribe-rs = { version = "0.2.8", features = ["whisper", "parakeet", "moonshine", "sense_voice", "gigaam"] }
-handy-keys = "0.2.2"
+sha2 = "0.10"
+transcribe-rs = { version = "0.3.8", features = ["whisper-cpp", "onnx"] }
+handy-keys = "0.2.4"
 ferrous-opencc = "0.2.3"
 clap = { version = "4", features = ["derive"] }
 specta = "=2.0.0-rc.22"
 specta-typescript = "0.0.9"
 tauri-specta = { version = "=2.0.0-rc.21", features = ["derive", "typescript"] }
-tauri-plugin-dialog = "~2.4"
+tauri-plugin-dialog = "2.6"
 
 [target.'cfg(unix)'.dependencies]
 signal-hook = "0.3"
@@ -89,6 +90,7 @@ tauri-plugin-single-instance = "2.3.2"
 tauri-plugin-updater = "2.10.0"
 
 [target.'cfg(windows)'.dependencies]
+transcribe-rs = { version = "0.3.3", features = ["whisper-vulkan", "ort-directml"] }
 windows = { version = "0.61.3", features = [
   "Win32_Media_Audio_Endpoints",
   "Win32_System_Com_StructuredStorage",
@@ -96,13 +98,16 @@ windows = { version = "0.61.3", features = [
   "Win32_Foundation",
   "Win32_UI_WindowsAndMessaging",
 ] }
+winreg = "0.55"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2.1" }
+transcribe-rs = { version = "0.3.3", features = ["whisper-metal"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk-layer-shell = { version = "0.8", features = ["v0_6"] }
 gtk = "0.18"
+transcribe-rs = { version = "0.3.3", features = ["whisper-vulkan"] }
 
 [patch.crates-io]
 tauri-runtime = { git = "https://github.com/cjpais/tauri.git", branch = "handy-2.10.2" }
@@ -116,4 +121,4 @@ tempfile = "3"
 lto = true
 codegen-units = 1
 strip = true
-panic = "abort"
+panic = "unwind"

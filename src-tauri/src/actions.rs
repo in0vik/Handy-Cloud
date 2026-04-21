@@ -1,9 +1,10 @@
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 use crate::apple_intelligence;
 use crate::audio_feedback::{play_feedback_sound, play_feedback_sound_blocking, SoundType};
-use crate::cloud_providers::{MODEL_ID_CLOUD, MODEL_ID_GEMINI};
+use crate::audio_toolkit::{is_microphone_access_denied, is_no_input_device_error};
 use crate::managers::audio::AudioRecordingManager;
 use crate::managers::history::HistoryManager;
+use crate::managers::model::ModelManager;
 use crate::managers::transcription::TranscriptionManager;
 use crate::settings::{get_settings, AppSettings, APPLE_INTELLIGENCE_PROVIDER_ID};
 use crate::shortcut;
@@ -12,13 +13,21 @@ use crate::utils::{
     self, show_processing_overlay, show_recording_overlay, show_transcribing_overlay,
 };
 use crate::TranscriptionCoordinator;
+use crate::{cloud_providers::is_cloud_model, cloud_providers::MODEL_ID_GEMINI};
 use ferrous_opencc::{config::BuiltinConfig, OpenCC};
 use log::{debug, error, warn};
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::Manager;
+use tauri::{AppHandle, Emitter};
+
+#[derive(Clone, serde::Serialize)]
+struct RecordingErrorEvent {
+    error_type: String,
+    detail: Option<String>,
+}
 
 /// Drop guard that notifies the [`TranscriptionCoordinator`] when the
 /// transcription pipeline finishes — whether it completes normally or panics.
@@ -50,7 +59,11 @@ fn strip_invisible_chars(s: &str) -> String {
     s.replace(['\u{200B}', '\u{200C}', '\u{200D}', '\u{FEFF}'], "")
 }
 
-use crate::cloud_providers::build_system_prompt;
+/// Build a system prompt from the user's prompt template.
+/// Removes `${output}` placeholder since the transcription is sent as the user message.
+fn build_system_prompt(prompt_template: &str) -> String {
+    prompt_template.replace("${output}", "").trim().to_string()
+}
 
 async fn post_process_transcription(settings: &AppSettings, transcription: &str) -> Option<String> {
     let provider = match settings.active_post_process_provider().cloned() {
@@ -284,7 +297,7 @@ async fn maybe_convert_chinese_variant(
         BuiltinConfig::Tw2sp
     } else {
         // Convert Simplified Chinese to Traditional Chinese
-        BuiltinConfig::S2twp
+        BuiltinConfig::S2tw
     };
 
     match OpenCC::from_config(config) {
@@ -304,6 +317,52 @@ async fn maybe_convert_chinese_variant(
     }
 }
 
+pub(crate) struct ProcessedTranscription {
+    pub final_text: String,
+    pub post_processed_text: Option<String>,
+    pub post_process_prompt: Option<String>,
+}
+
+pub(crate) async fn process_transcription_output(
+    app: &AppHandle,
+    transcription: &str,
+    post_process: bool,
+) -> ProcessedTranscription {
+    let settings = get_settings(app);
+    let mut final_text = transcription.to_string();
+    let mut post_processed_text: Option<String> = None;
+    let mut post_process_prompt: Option<String> = None;
+
+    if let Some(converted_text) = maybe_convert_chinese_variant(&settings, transcription).await {
+        final_text = converted_text;
+    }
+
+    if post_process {
+        if let Some(processed_text) = post_process_transcription(&settings, &final_text).await {
+            post_processed_text = Some(processed_text.clone());
+            final_text = processed_text;
+
+            if let Some(prompt_id) = &settings.post_process_selected_prompt_id {
+                if let Some(prompt) = settings
+                    .post_process_prompts
+                    .iter()
+                    .find(|prompt| &prompt.id == prompt_id)
+                {
+                    post_process_prompt = Some(prompt.prompt.clone());
+                }
+            }
+        }
+    } else if final_text != transcription {
+        post_processed_text = Some(final_text.clone());
+    }
+
+    ProcessedTranscription {
+        final_text,
+        post_processed_text,
+        post_process_prompt,
+    }
+}
+
 impl ShortcutAction for TranscribeAction {
     fn start(&self, app: &AppHandle, binding_id: &str, _shortcut_str: &str) {
         let start_time = Instant::now();
@@ -311,20 +370,27 @@ impl ShortcutAction for TranscribeAction {
 
         // Load model in the background
         let tm = app.state::<Arc<TranscriptionManager>>();
+        let rm = app.state::<Arc<AudioRecordingManager>>();
+
+        // Load ASR model and VAD model in parallel
         tm.initiate_model_load();
+        let rm_clone = Arc::clone(&rm);
+        std::thread::spawn(move || {
+            if let Err(e) = rm_clone.preload_vad() {
+                debug!("VAD pre-load failed: {}", e);
+            }
+        });
 
         let binding_id = binding_id.to_string();
         change_tray_icon(app, TrayIconState::Recording);
         show_recording_overlay(app);
-
-        let rm = app.state::<Arc<AudioRecordingManager>>();
 
         // Get the microphone mode to determine audio feedback timing
         let settings = get_settings(app);
         let is_always_on = settings.always_on_microphone;
         debug!("Microphone mode - always_on: {}", is_always_on);
 
-        let mut recording_started = false;
+        let mut recording_error: Option<String> = None;
         if is_always_on {
             // Always-on mode: Play audio feedback immediately, then apply mute after sound finishes
             debug!("Always-on mode: Playing audio feedback immediately");
@@ -337,35 +403,61 @@ impl ShortcutAction for TranscribeAction {
                 rm_clone.apply_mute();
             });
 
-            recording_started = rm.try_start_recording(&binding_id);
-            debug!("Recording started: {}", recording_started);
+            if let Err(e) = rm.try_start_recording(&binding_id) {
+                debug!("Recording failed: {}", e);
+                recording_error = Some(e);
+            }
         } else {
             // On-demand mode: Start recording first, then play audio feedback, then apply mute
             // This allows the microphone to be activated before playing the sound
             debug!("On-demand mode: Starting recording first, then audio feedback");
             let recording_start_time = Instant::now();
-            if rm.try_start_recording(&binding_id) {
-                recording_started = true;
-                debug!("Recording started in {:?}", recording_start_time.elapsed());
-                // Small delay to ensure microphone stream is active
-                let app_clone = app.clone();
-                let rm_clone = Arc::clone(&rm);
-                std::thread::spawn(move || {
-                    std::thread::sleep(std::time::Duration::from_millis(100));
-                    debug!("Handling delayed audio feedback/mute sequence");
-                    // Helper handles disabled audio feedback by returning early, so we reuse it
-                    // to keep mute sequencing consistent in every mode.
-                    play_feedback_sound_blocking(&app_clone, SoundType::Start);
-                    rm_clone.apply_mute();
-                });
-            } else {
-                debug!("Failed to start recording");
+            match rm.try_start_recording(&binding_id) {
+                Ok(()) => {
+                    debug!("Recording started in {:?}", recording_start_time.elapsed());
+                    // Small delay to ensure microphone stream is active
+                    let app_clone = app.clone();
+                    let rm_clone = Arc::clone(&rm);
+                    std::thread::spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                        debug!("Handling delayed audio feedback/mute sequence");
+                        // Helper handles disabled audio feedback by returning early, so we reuse it
+                        // to keep mute sequencing consistent in every mode.
+                        play_feedback_sound_blocking(&app_clone, SoundType::Start);
+                        rm_clone.apply_mute();
+                    });
+                }
+                Err(e) => {
+                    debug!("Failed to start recording: {}", e);
+                    recording_error = Some(e);
+                }
             }
         }
 
-        if recording_started {
+        if recording_error.is_none() {
             // Dynamically register the cancel shortcut in a separate task to avoid deadlock
             shortcut::register_cancel_shortcut(app);
+        } else {
+            // Starting failed (for example due to blocked microphone permissions).
+            // Revert UI state so we don't stay stuck in the recording overlay.
+            utils::hide_recording_overlay(app);
+            change_tray_icon(app, TrayIconState::Idle);
+            if let Some(err) = recording_error {
+                let error_type = if is_microphone_access_denied(&err) {
+                    "microphone_permission_denied"
+                } else if is_no_input_device_error(&err) {
+                    "no_input_device"
+                } else {
+                    "unknown"
+                };
+                let _ = app.emit(
+                    "recording-error",
+                    RecordingErrorEvent {
+                        error_type: error_type.to_string(),
+                        detail: Some(err),
+                    },
+                );
+            }
         }
 
         debug!(
@@ -385,7 +477,7 @@ impl ShortcutAction for TranscribeAction {
         let rm = Arc::clone(&app.state::<Arc<AudioRecordingManager>>());
         let tm = Arc::clone(&app.state::<Arc<TranscriptionManager>>());
         let hm = Arc::clone(&app.state::<Arc<HistoryManager>>());
-        let mm = Arc::clone(&app.state::<Arc<crate::managers::model::ModelManager>>());
+        let mm = Arc::clone(&app.state::<Arc<ModelManager>>());
 
         change_tray_icon(app, TrayIconState::Transcribing);
         show_transcribing_overlay(app);
@@ -401,7 +493,6 @@ impl ShortcutAction for TranscribeAction {
 
         tauri::async_runtime::spawn(async move {
             let _guard = FinishGuard(ah.clone());
-            let binding_id = binding_id.clone(); // Clone for the inner async task
             debug!(
                 "Starting async transcription task for binding: {}",
                 binding_id
@@ -415,162 +506,268 @@ impl ShortcutAction for TranscribeAction {
                     samples.len()
                 );
 
-                let settings = get_settings(&ah);
+                if samples.is_empty() {
+                    debug!("Recording produced no audio samples; skipping persistence");
+                    utils::hide_recording_overlay(&ah);
+                    change_tray_icon(&ah, TrayIconState::Idle);
+                } else {
+                    // Save WAV concurrently with transcription
+                    let sample_count = samples.len();
+                    let file_name = format!("handy-{}.wav", chrono::Utc::now().timestamp());
+                    let wav_path = hm.recordings_dir().join(&file_name);
+                    let wav_path_for_verify = wav_path.clone();
+                    let samples_for_wav = samples.clone();
+                    let samples_for_retry = samples.clone();
+                    let wav_handle = tauri::async_runtime::spawn_blocking(move || {
+                        crate::audio_toolkit::save_wav_file(&wav_path, &samples_for_wav)
+                    });
 
-                let transcription_time = Instant::now();
-                let samples_clone = samples.clone(); // Clone for history saving
-                match tm.transcribe(samples, post_process) {
-                    Ok(transcription) => {
-                        debug!(
-                            "Transcription completed in {:?}: '{}'",
-                            transcription_time.elapsed(),
-                            transcription
-                        );
-                        if !transcription.is_empty() {
-                            let mut final_text = transcription.clone();
-                            let mut post_processed_text: Option<String> = None;
-                            let mut post_process_prompt: Option<String> = None;
+                    // Transcribe concurrently with WAV save
+                    let transcription_time = Instant::now();
+                    let transcription_result = tm.transcribe(samples, post_process);
 
-                            // First, check if Chinese variant conversion is needed
-                            if let Some(converted_text) =
-                                maybe_convert_chinese_variant(&settings, &transcription).await
-                            {
-                                final_text = converted_text;
+                    // Await WAV save and verify
+                    let wav_saved = match wav_handle.await {
+                        Ok(Ok(())) => {
+                            match crate::audio_toolkit::verify_wav_file(
+                                &wav_path_for_verify,
+                                sample_count,
+                            ) {
+                                Ok(()) => true,
+                                Err(e) => {
+                                    error!("WAV verification failed: {}", e);
+                                    false
+                                }
                             }
+                        }
+                        Ok(Err(e)) => {
+                            error!("Failed to save WAV file: {}", e);
+                            false
+                        }
+                        Err(e) => {
+                            error!("WAV save task panicked: {}", e);
+                            false
+                        }
+                    };
 
-                            // Then apply LLM post-processing if this is the post-process hotkey
-                            // Uses final_text which may already have Chinese conversion applied
+                    match transcription_result {
+                        Ok(transcription) => {
+                            debug!(
+                                "Transcription completed in {:?}: '{}'",
+                                transcription_time.elapsed(),
+                                transcription
+                            );
+
                             if post_process {
                                 show_processing_overlay(&ah);
                             }
-                            // Gemini already handled post-processing in the transcription step
                             let processed =
-                                if post_process && settings.selected_model != MODEL_ID_GEMINI {
-                                    post_process_transcription(&settings, &final_text).await
-                                } else {
-                                    None
-                                };
-                            if let Some(processed_text) = processed {
-                                post_processed_text = Some(processed_text.clone());
-                                final_text = processed_text;
+                                process_transcription_output(&ah, &transcription, post_process)
+                                    .await;
 
-                                // Get the prompt that was used
-                                if let Some(prompt_id) = &settings.post_process_selected_prompt_id {
-                                    if let Some(prompt) = settings
-                                        .post_process_prompts
-                                        .iter()
-                                        .find(|p| &p.id == prompt_id)
-                                    {
-                                        post_process_prompt = Some(prompt.prompt.clone());
-                                    }
+                            // Save to history if WAV was saved
+                            if wav_saved {
+                                if let Err(err) = hm.save_entry(
+                                    file_name,
+                                    transcription,
+                                    post_process,
+                                    processed.post_processed_text.clone(),
+                                    processed.post_process_prompt.clone(),
+                                ) {
+                                    error!("Failed to save history entry: {}", err);
                                 }
-                            } else if final_text != transcription {
-                                // Chinese conversion was applied but no LLM post-processing
-                                post_processed_text = Some(final_text.clone());
                             }
 
-                            // Save to history with post-processed text and prompt
-                            let hm_clone = Arc::clone(&hm);
-                            let transcription_for_history = transcription.clone();
-                            tauri::async_runtime::spawn(async move {
-                                if let Err(e) = hm_clone
-                                    .save_transcription(
-                                        samples_clone,
-                                        transcription_for_history,
-                                        post_processed_text,
-                                        post_process_prompt,
-                                    )
-                                    .await
-                                {
-                                    error!("Failed to save transcription to history: {}", e);
-                                }
-                            });
-
-                            // Paste the final text (either processed or original)
-                            let ah_clone = ah.clone();
-                            let paste_time = Instant::now();
-                            ah.run_on_main_thread(move || {
-                                match utils::paste(final_text, ah_clone.clone()) {
-                                    Ok(()) => debug!(
-                                        "Text pasted successfully in {:?}",
-                                        paste_time.elapsed()
-                                    ),
-                                    Err(e) => error!("Failed to paste transcription: {}", e),
-                                }
-                                // Hide the overlay after transcription is complete
-                                utils::hide_recording_overlay(&ah_clone);
-                                change_tray_icon(&ah_clone, TrayIconState::Idle);
-                            })
-                            .unwrap_or_else(|e| {
-                                error!("Failed to run paste on main thread: {:?}", e);
+                            if processed.final_text.is_empty() {
                                 utils::hide_recording_overlay(&ah);
                                 change_tray_icon(&ah, TrayIconState::Idle);
-                            });
-                        } else {
+                            } else {
+                                let ah_clone = ah.clone();
+                                let paste_time = Instant::now();
+                                let final_text = processed.final_text;
+                                ah.run_on_main_thread(move || {
+                                    match utils::paste(final_text, ah_clone.clone()) {
+                                        Ok(()) => debug!(
+                                            "Text pasted successfully in {:?}",
+                                            paste_time.elapsed()
+                                        ),
+                                        Err(e) => error!("Failed to paste transcription: {}", e),
+                                    }
+                                    utils::hide_recording_overlay(&ah_clone);
+                                    change_tray_icon(&ah_clone, TrayIconState::Idle);
+                                })
+                                .unwrap_or_else(|e| {
+                                    error!("Failed to run paste on main thread: {:?}", e);
+                                    utils::hide_recording_overlay(&ah);
+                                    change_tray_icon(&ah, TrayIconState::Idle);
+                                });
+                            }
+                        }
+                        Err(err) => {
+                            debug!("Global Shortcut Transcription error: {}", err);
+                            let settings = get_settings(&ah);
+
+                            if settings.selected_model == MODEL_ID_GEMINI {
+                                let fallback =
+                                    mm.get_available_models().into_iter().find(|model| {
+                                        model.is_downloaded
+                                            && !model.is_custom
+                                            && !is_cloud_model(&model.id)
+                                    });
+
+                                if let Some(fallback_model) = fallback {
+                                    warn!(
+                                        "Gemini failed, falling back to local model: {}",
+                                        fallback_model.id
+                                    );
+
+                                    match tm.load_model(&fallback_model.id) {
+                                        Ok(()) => {
+                                            match tm.transcribe(samples_for_retry.clone(), false) {
+                                                Ok(transcription) => {
+                                                    if let Err(reload_err) =
+                                                        tm.load_model(MODEL_ID_GEMINI)
+                                                    {
+                                                        error!(
+                                                            "Failed to reload Gemini model after fallback: {}",
+                                                            reload_err
+                                                        );
+                                                    }
+
+                                                    debug!(
+                                                        "Fallback transcription completed in {:?}: '{}'",
+                                                        transcription_time.elapsed(),
+                                                        transcription
+                                                    );
+
+                                                    if post_process {
+                                                        show_processing_overlay(&ah);
+                                                    }
+                                                    let processed = process_transcription_output(
+                                                        &ah,
+                                                        &transcription,
+                                                        post_process,
+                                                    )
+                                                    .await;
+
+                                                    if wav_saved {
+                                                        if let Err(save_err) = hm.save_entry(
+                                                            file_name,
+                                                            transcription,
+                                                            post_process,
+                                                            processed.post_processed_text.clone(),
+                                                            processed.post_process_prompt.clone(),
+                                                        ) {
+                                                            error!(
+                                                                "Failed to save fallback history entry: {}",
+                                                                save_err
+                                                            );
+                                                        }
+                                                    }
+
+                                                    if processed.final_text.is_empty() {
+                                                        utils::hide_recording_overlay(&ah);
+                                                        change_tray_icon(&ah, TrayIconState::Idle);
+                                                    } else {
+                                                        let ah_clone = ah.clone();
+                                                        let paste_time = Instant::now();
+                                                        let final_text = processed.final_text;
+                                                        ah.run_on_main_thread(move || {
+                                                            match utils::paste(
+                                                                final_text,
+                                                                ah_clone.clone(),
+                                                            ) {
+                                                                Ok(()) => debug!(
+                                                                    "Fallback text pasted successfully in {:?}",
+                                                                    paste_time.elapsed()
+                                                                ),
+                                                                Err(e) => error!(
+                                                                    "Failed to paste fallback transcription: {}",
+                                                                    e
+                                                                ),
+                                                            }
+                                                            utils::hide_recording_overlay(&ah_clone);
+                                                            change_tray_icon(
+                                                                &ah_clone,
+                                                                TrayIconState::Idle,
+                                                            );
+                                                        })
+                                                        .unwrap_or_else(|e| {
+                                                            error!(
+                                                                "Failed to run fallback paste on main thread: {:?}",
+                                                                e
+                                                            );
+                                                            utils::hide_recording_overlay(&ah);
+                                                            change_tray_icon(
+                                                                &ah,
+                                                                TrayIconState::Idle,
+                                                            );
+                                                        });
+                                                    }
+
+                                                    return;
+                                                }
+                                                Err(fallback_err) => {
+                                                    error!(
+                                                        "Fallback transcription also failed: {}",
+                                                        fallback_err
+                                                    );
+                                                }
+                                            }
+                                        }
+                                        Err(load_err) => {
+                                            error!(
+                                                "Failed to load fallback model {}: {}",
+                                                fallback_model.id, load_err
+                                            );
+                                        }
+                                    }
+
+                                    if let Err(reload_err) = tm.load_model(MODEL_ID_GEMINI) {
+                                        error!(
+                                            "Failed to reload Gemini model after failed fallback: {}",
+                                            reload_err
+                                        );
+                                    }
+                                } else {
+                                    warn!(
+                                        "Gemini failed and no downloaded local fallback model exists"
+                                    );
+                                }
+                            } else if is_cloud_model(&settings.selected_model) {
+                                let pending_result = if wav_saved {
+                                    hm.save_pending_entry(file_name, post_process)
+                                } else {
+                                    hm.save_pending_transcription(
+                                        samples_for_retry.clone(),
+                                        post_process,
+                                    )
+                                    .await
+                                };
+
+                                if let Err(save_err) = pending_result {
+                                    error!(
+                                        "Failed to save pending cloud history entry: {}",
+                                        save_err
+                                    );
+                                }
+
+                                let _ = ah.emit("cloud-transcription-failed", ());
+                            } else if wav_saved {
+                                if let Err(save_err) = hm.save_entry(
+                                    file_name,
+                                    String::new(),
+                                    post_process,
+                                    None,
+                                    None,
+                                ) {
+                                    error!("Failed to save failed history entry: {}", save_err);
+                                }
+                            }
+
                             utils::hide_recording_overlay(&ah);
                             change_tray_icon(&ah, TrayIconState::Idle);
                         }
-                    }
-                    Err(err) => {
-                        warn!("Transcription error: {}", err);
-                        let settings = get_settings(&ah);
-
-                        if settings.selected_model == MODEL_ID_GEMINI {
-                            // Fallback: find any downloaded local model and retry
-                            let fallback = mm.get_available_models().into_iter().find(|m| {
-                                m.is_downloaded
-                                    && m.id != MODEL_ID_CLOUD
-                                    && m.id != MODEL_ID_GEMINI
-                                    && !m.is_custom
-                            });
-                            if let Some(fallback_model) = fallback {
-                                warn!(
-                                    "Gemini failed, falling back to local model: {}",
-                                    fallback_model.id
-                                );
-                                if let Err(e) = tm.load_model(&fallback_model.id) {
-                                    error!(
-                                        "Failed to load fallback model {}: {}",
-                                        fallback_model.id, e
-                                    );
-                                } else {
-                                    match tm.transcribe(samples_clone.clone(), false) {
-                                        Ok(text) => {
-                                            warn!(
-                                                "Fallback transcription succeeded: {} chars",
-                                                text.len()
-                                            );
-                                            if !text.is_empty() {
-                                                let ah_clone = ah.clone();
-                                                let _ = ah.run_on_main_thread(move || {
-                                                    let _ = utils::paste(text, ah_clone);
-                                                });
-                                            }
-                                            // Reload Gemini for next time
-                                            let _ = tm.load_model(MODEL_ID_GEMINI);
-                                        }
-                                        Err(e2) => {
-                                            error!("Fallback transcription also failed: {}", e2);
-                                            let _ = tm.load_model(MODEL_ID_GEMINI);
-                                        }
-                                    }
-                                }
-                            } else {
-                                warn!("Gemini failed and no local model available for fallback");
-                            }
-                        } else if settings.selected_model == MODEL_ID_CLOUD {
-                            let hm_clone = Arc::clone(&hm);
-                            tauri::async_runtime::spawn(async move {
-                                if let Err(e) =
-                                    hm_clone.save_pending_transcription(samples_clone).await
-                                {
-                                    error!("Failed to save pending cloud transcription: {}", e);
-                                }
-                            });
-                            let _ = ah.emit("cloud-transcription-failed", ());
-                        }
-                        utils::hide_recording_overlay(&ah);
-                        change_tray_icon(&ah, TrayIconState::Idle);
                     }
                 }
             } else {
