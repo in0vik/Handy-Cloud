@@ -458,9 +458,9 @@ const HistoryEntryComponent: React.FC<HistoryEntryProps> = ({
           ? t("settings.history.transcribing")
           : isCloudPending
             ? CLOUD_PENDING_PLACEHOLDER
-          : hasTranscription
-            ? entry.transcription_text
-            : t("settings.history.transcriptionFailed")}
+            : hasTranscription
+              ? entry.transcription_text
+              : t("settings.history.transcriptionFailed")}
       </p>
 
       <AudioPlayer onLoadRequest={handleLoadAudio} className="w-full" />
